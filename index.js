@@ -154,6 +154,8 @@ prerender.getPrerenderedPageResponse = function(req, callback) {
     uri: url.parse(prerender.buildApiUrl(req)),
     followRedirect: false
   };
+
+
   options.headers = {
     'User-Agent': req.headers['user-agent'],
     'Accept-Encoding': 'gzip'
@@ -161,16 +163,33 @@ prerender.getPrerenderedPageResponse = function(req, callback) {
   if(this.prerenderToken || process.env.PRERENDER_TOKEN) {
     options.headers['X-Prerender-Token'] = this.prerenderToken || process.env.PRERENDER_TOKEN;
   }
+  var retryCount = 2;
+  var currentRetry = 1;
 
-  request.get(options).on('response', function(response) {
+  var executeRequest = function() {
+    request.get(options).on('response', function(response) {
+      processRequest(null, response);
+    }).on('error', function(error) {
+      processRequest(error);
+    });
+  };
+
+  var processRequest = function(error, response) {
+    if((error || response.statusCode === 504) && currentRetry <= retryCount) {
+      currentRetry++;
+      return executeRequest();
+    }
+    if(error) {
+      return callback(null);
+    }
     if(response.headers['content-encoding'] && response.headers['content-encoding'] === 'gzip') {
       prerender.gunzipResponse(response, callback);
     } else {
       prerender.plainResponse(response, callback);
     }
-  }).on('error', function() {
-    callback(null);
-  });
+  };
+
+  executeRequest();
 };
 
 prerender.gunzipResponse = function(response, callback) {
