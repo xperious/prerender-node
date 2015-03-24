@@ -163,8 +163,9 @@ prerender.getPrerenderedPageResponse = function(req, callback) {
   if(this.prerenderToken || process.env.PRERENDER_TOKEN) {
     options.headers['X-Prerender-Token'] = this.prerenderToken || process.env.PRERENDER_TOKEN;
   }
-  var retryCount = 2;
+  var retryCount = parseInt(process.env.PRERENDER_RETRY_COUNT) || 1;
   var currentRetry = 1;
+  var finishedWithOk = false;
 
   var executeRequest = function() {
     request.get(options).on('response', function(response) {
@@ -175,6 +176,9 @@ prerender.getPrerenderedPageResponse = function(req, callback) {
   };
 
   var processRequest = function(error, response) {
+    if(finishedWithOk) {
+      return;
+    }
     if((error || response.statusCode === 504) && currentRetry <= retryCount) {
       currentRetry++;
       return executeRequest();
@@ -182,14 +186,16 @@ prerender.getPrerenderedPageResponse = function(req, callback) {
     if(error) {
       return callback(null);
     }
+    finishedWithOk = true;
     if(response.headers['content-encoding'] && response.headers['content-encoding'] === 'gzip') {
       prerender.gunzipResponse(response, callback);
     } else {
       prerender.plainResponse(response, callback);
     }
   };
-
-  executeRequest();
+  for(var pi = 0; pi < (parseInt(process.env.PRERENDER_PARALLEL_REQUESTS) || 1); pi++) {
+    executeRequest();
+  }
 };
 
 prerender.gunzipResponse = function(response, callback) {
